@@ -23,6 +23,8 @@ cleanup() {
     if [ "$code" -ne 0 ]; then
         log "ÉCHEC (code $code) - journaux du conteneur :"
         docker logs --tail 300 "$NAME" 2>&1 || true
+        log "journaux des fonctions Edge (extrait) :"
+        docker logs "$NAME" 2>&1 | grep -E '^\[functions\]|démarrage de functions' | head -n 60 || true
     fi
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     # Les fichiers de la base appartiennent à un autre utilisateur : on les supprime depuis un conteneur.
