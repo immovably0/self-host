@@ -408,6 +408,58 @@ start_jail() {
     PIDS[$name]=$!
 }
 
+# start_loader NOM [ARGUMENTS...]
+# Variante sans chroot, pour les services qui ont besoin de /proc (fonctions Edge) :
+# le binaire de l'image est lancé avec le chargeur dynamique (ld.so) et les
+# bibliothèques de cette image, sans les mélanger avec celles de l'image de base.
+start_loader() {
+    local name=$1; shift
+    local root="/opt/$name" cfg="$NUVIO_HOME/svc/$name.json"
+    [ -d "$root" ] || die "système de fichiers du service $name introuvable ($root)"
+    [ -s "$cfg" ] || die "configuration d'image $cfg introuvable"
+
+    local -a entry=() cmd=() image_env=() extra_env=()
+    mapfile -t entry < <(jq -r '(.Entrypoint // [])[]' "$cfg")
+    if [ $# -gt 0 ]; then
+        cmd=("$@")
+    else
+        mapfile -t cmd < <(jq -r '(.Cmd // [])[]' "$cfg")
+    fi
+    mapfile -t image_env < <(jq -r '(.Env // [])[]' "$cfg")
+    mapfile -t extra_env < <("env_$name")
+
+    local bin=${entry[0]:-} binary="" dir
+    [ -n "$bin" ] || die "le service $name n'a pas d'ENTRYPOINT : lancement sans chroot impossible"
+    if [[ "$bin" = /* ]]; then
+        binary="$root$bin"
+    else
+        for dir in usr/local/sbin usr/local/bin usr/sbin usr/bin sbin bin; do
+            if [ -x "$root/$dir/$bin" ]; then binary="$root/$dir/$bin"; break; fi
+        done
+    fi
+    [ -x "$binary" ] || die "binaire $bin introuvable dans $root"
+
+    local loader libpath
+    loader=$(ls "$root"/lib64/ld-linux-*.so.* "$root"/lib/ld-linux-*.so.* \
+        "$root"/lib/*-linux-gnu/ld-linux-*.so.* "$root"/usr/lib/*-linux-gnu/ld-linux-*.so.* 2>/dev/null | head -n1)
+    [ -n "$loader" ] || die "chargeur dynamique (ld-linux) introuvable dans $root"
+    libpath="$root/lib:$root/lib64:$root/usr/lib:$root/usr/lib64:$root/usr/local/lib"
+    for dir in "$root"/lib/*-linux-gnu "$root"/usr/lib/*-linux-gnu; do
+        [ -d "$dir" ] && libpath="$libpath:$dir"
+    done
+
+    local -a argv=("${entry[@]:1}" "${cmd[@]}")
+    local -a envcmd=(env -i
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root
+        "${image_env[@]}" "${extra_env[@]}")
+    log "démarrage de $name (sans chroot) : $bin ${argv[*]}"
+    (
+        exec > >(prefix_output "$name") 2>&1
+        exec "${envcmd[@]}" "$loader" --library-path "$libpath" "$binary" "${argv[@]}"
+    ) &
+    PIDS[$name]=$!
+}
+
 find_db_entrypoint() {
     local cfg="$NUVIO_HOME/svc/db.json" candidate
     DB_ENTRY=()
@@ -709,14 +761,16 @@ cmd_run() {
     start_jail auth
     start_jail rest postgrest
     start_jail storage
-    start_jail functions start --main-service /home/deno/functions/main
+    start_loader functions start --main-service /home/deno/functions/main
     start_jail dashboard
     start_caddy
 
     wait_for_url "Passerelle" 60 -H "apikey: $ANON_KEY" "$GATEWAY_URL/auth/v1/health" || true
+    # Storage crée ses propres tables au démarrage : les migrations Nuvio en dépendent.
+    wait_for_url "Storage" 300 -H "apikey: $ANON_KEY" "$GATEWAY_URL/storage/v1/status" \
+        || log "ATTENTION : Storage ne répond pas, la migration du stockage risque d'échouer"
     run_migrations
     configure_instance
-    wait_for_url "Storage" 120 -H "apikey: $ANON_KEY" "$GATEWAY_URL/storage/v1/status" || true
     seed_avatar_assets || log "ATTENTION : avatars non initialisés (le conteneur continue)"
 
     check_services || log "ATTENTION : certains contrôles ont échoué, consultez les journaux ci-dessus"

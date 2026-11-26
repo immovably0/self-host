@@ -25,7 +25,9 @@ cleanup() {
         docker logs --tail 300 "$NAME" 2>&1 || true
     fi
     docker rm -f "$NAME" >/dev/null 2>&1 || true
-    rm -rf "$WORK"
+    # Les fichiers de la base appartiennent à un autre utilisateur : on les supprime depuis un conteneur.
+    docker run --rm --entrypoint sh -v "$WORK:/work" "$IMAGE" -c 'rm -rf /work/* /work/.[!.]*' >/dev/null 2>&1 || true
+    rm -rf "$WORK" 2>/dev/null || true
     exit "$code"
 }
 trap cleanup EXIT
