@@ -1,0 +1,173 @@
+# Passerelle unique de l'image tout-en-un Nuvio.
+#
+# Elle remplace Kong (absent de cette image) et reprend les routes de
+# volumes/api/kong.yml ainsi que celles de volumes/proxy/caddy/Caddyfile.
+# Toutes les variables {$...} sont fournies par nuvio-entrypoint.
+#
+# Deux sites :
+#   - public  : {$NUVIO_SITE_ADDRESS} (":8000" en HTTP simple, ou le domaine si
+#               HTTPS automatique) -> API + tableau de bord
+#   - interne : 127.0.0.1:8001, utilisé par les fonctions Edge et les contrôles
+#               de santé, jamais publié hors du conteneur
+{
+	admin off
+	servers {
+		trusted_proxies static private_ranges
+	}
+}
+
+(cors) {
+	header >Access-Control-Allow-Origin "*"
+	header >Access-Control-Allow-Headers "{http.request.header.Access-Control-Request-Headers}"
+	header >Access-Control-Allow-Methods "GET, HEAD, PUT, PATCH, POST, DELETE, OPTIONS, TRACE, CONNECT"
+}
+
+# Équivalent des plugins key-auth + request-transformer de Kong :
+# l'en-tête apikey doit contenir la clé anon ou la clé service_role, et
+# Authorization est complété à partir d'apikey quand il est absent.
+(keyauth) {
+	@bad_key {
+		not header apikey {$ANON_KEY}
+		not header apikey {$SERVICE_ROLE_KEY}
+	}
+	header @bad_key Content-Type "application/json; charset=utf-8"
+	respond @bad_key `{"message":"Invalid authentication credentials"}` 401
+
+	@no_auth {
+		not header Authorization *
+		header apikey *
+	}
+	request_header @no_auth Authorization "Bearer {http.request.header.apikey}"
+}
+
+(api) {
+	# Préflight CORS (traité avant l'authentification, comme le plugin cors de Kong)
+	@preflight method OPTIONS
+	handle @preflight {
+		import cors
+		respond 204
+	}
+
+	@health path /health /healthz
+	handle @health {
+		header Content-Type "application/json; charset=utf-8"
+		respond `{"service":"nuvio-backend","status":"ok"}` 200
+	}
+
+	# Découverte publique pour les clients Nuvio
+	@discovery path /.well-known/nuvio
+	handle @discovery {
+		import cors
+		header Content-Type "application/json; charset=utf-8"
+		respond `{"version":1,"service":"nuvio","self_hosted":true,"backend_url":"{$NUVIO_PUBLIC_URL}","publishable_key":"{$ANON_KEY}","capabilities":{"email_password_auth":true,"tv_login":true}}` 200
+	}
+
+	# Auth : routes ouvertes (sans apikey)
+	@auth_open path /auth/v1/verify /auth/v1/verify/* /auth/v1/callback /auth/v1/callback/* /auth/v1/authorize /auth/v1/authorize/* /auth/v1/.well-known/jwks.json
+	handle @auth_open {
+		import cors
+		uri strip_prefix /auth/v1
+		reverse_proxy 127.0.0.1:9999
+	}
+
+	@oauth_meta path /.well-known/oauth-authorization-server /sso/saml/acs /sso/saml/metadata
+	handle @oauth_meta {
+		import cors
+		reverse_proxy 127.0.0.1:9999
+	}
+
+	# Auth : routes protégées
+	@auth path /auth/v1 /auth/v1/*
+	handle @auth {
+		import cors
+		import keyauth
+		uri strip_prefix /auth/v1
+		reverse_proxy 127.0.0.1:9999
+	}
+
+	# API REST (PostgREST)
+	@rest path /rest/v1 /rest/v1/*
+	handle @rest {
+		import cors
+		import keyauth
+		uri strip_prefix /rest/v1
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	# GraphQL (PostgREST, schéma graphql_public)
+	@graphql path /graphql/v1 /graphql/v1/*
+	handle @graphql {
+		import cors
+		import keyauth
+		rewrite * /rpc/graphql
+		request_header Content-Profile graphql_public
+		reverse_proxy 127.0.0.1:3000
+	}
+
+	# Storage : pas de key-auth (les URL présignées S3 n'ont pas d'apikey)
+	@storage path /storage/v1 /storage/v1/*
+	handle @storage {
+		import cors
+		@storage_bearer {
+			not header Authorization *
+			header apikey *
+		}
+		request_header @storage_bearer Authorization "Bearer {http.request.header.apikey}"
+		uri strip_prefix /storage/v1
+		reverse_proxy 127.0.0.1:5000 {
+			header_up X-Forwarded-Prefix /storage/v1
+		}
+	}
+
+	# Fonctions Edge
+	@functions path /functions/v1 /functions/v1/*
+	handle @functions {
+		import cors
+		uri strip_prefix /functions/v1
+		reverse_proxy 127.0.0.1:9000
+	}
+
+	# Non fournis dans l'image tout-en-un (profils optionnels de l'installation classique)
+	@unavailable path /realtime/v1 /realtime/v1/* /pg /pg/*
+	handle @unavailable {
+		header Content-Type "application/json; charset=utf-8"
+		respond `{"message":"Not available in the all-in-one image"}` 404
+	}
+
+	@mcp path /api/mcp /api/mcp/*
+	handle @mcp {
+		header Content-Type "application/json; charset=utf-8"
+		respond `{"message":"Access is forbidden."}` 403
+	}
+}
+
+# Site public
+{$NUVIO_SITE_ADDRESS} {
+	encode zstd gzip
+
+	# Connexion TV : ces routes sont appelées sans clé par les téléviseurs,
+	# la passerelle ajoute la clé publique (comportement du Caddyfile d'origine).
+	@tv_login path /rest/v1/rpc/start_tv_login_session /rest/v1/rpc/poll_tv_login_session /functions/v1/tv-logins-exchange
+	request_header @tv_login apikey "{$ANON_KEY}"
+	request_header @tv_login Authorization "Bearer {$ANON_KEY}"
+
+	import api
+
+	# Tout le reste : tableau de bord du compte
+	handle {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	header -Server
+}
+
+# Site interne (fonctions Edge, contrôles de santé)
+http://127.0.0.1:8001 {
+	bind 127.0.0.1
+	import api
+
+	handle {
+		header Content-Type "application/json; charset=utf-8"
+		respond `{"message":"Not found"}` 404
+	}
+}

@@ -1,0 +1,14 @@
+.git
+.github
+.env
+.env.*
+backups/
+dashboard/
+docs/
+tests/
+volumes/db/data/
+volumes/storage/
+*.pem
+*.key
+*.dump
+*.sql.gz

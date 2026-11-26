@@ -1,0 +1,41 @@
+# Nuvio tout-en-un : un seul conteneur, un seul fichier.
+#
+#   1. Remplacez NUVIO_PUBLIC_URL par l'adresse publique de votre backend.
+#   2. docker compose up -d
+#   3. docker exec nuvio nuvio credentials
+#
+# Les secrets (mot de passe de la base, clés JWT) sont générés au premier
+# démarrage et conservés dans ./data/app/secrets.env.
+#
+# STATUT : expérimental. Voir allinone/README.md.
+
+name: nuvio
+
+services:
+  nuvio:
+    image: ghcr.io/immovably0/nuvio-allinone:latest
+    container_name: nuvio
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 90s
+    ports:
+      # Derrière le proxy inversé du NAS : pointez-le vers ce port.
+      - "8000:8000"
+      # Avec NUVIO_AUTO_HTTPS=true (Caddy gère le certificat), ajoutez aussi :
+      # - "80:80"
+      # - "443:443"
+    environment:
+      # Adresse que les applications Nuvio utiliseront pour joindre le backend.
+      # Exemples : https://nuvio.exemple.fr  ou  http://192.168.1.20:8000
+      NUVIO_PUBLIC_URL: "https://nuvio.exemple.fr"
+      # NUVIO_AUTO_HTTPS: "false"
+    volumes:
+      - ./data/app:/data
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./data/storage:/opt/storage/var/lib/storage
+    # Si les fonctions Edge ou Storage échouent faute de /proc dans leur chroot,
+    # décommentez (moins isolé) :
+    # cap_add:
+    #   - SYS_ADMIN
+    # security_opt:
+    #   - apparmor=unconfined
