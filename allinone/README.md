@@ -2,7 +2,7 @@
 
 Une seule image Docker qui contient tout le backend Nuvio (base de données, authentification, API, stockage, fonctions, tableau de bord et passerelle HTTP). Elle s'installe comme n'importe quel conteneur de NAS, par exemple Jellyfin : une image, un port, trois dossiers.
 
-> **Statut : non testé de bout en bout.** Cette image a été écrite sans accès à un démon Docker. Les fichiers de configuration, le script de démarrage et le routage HTTP ont été vérifiés (voir « Ce qui a été vérifié »), mais l'image n'a jamais été construite ni lancée avant la première exécution du workflow GitHub. Ce workflow contient un test complet (démarrage, création de compte, redémarrage, reconnexion) : tant qu'il n'est pas vert, considérez l'image comme non fonctionnelle. Si elle ne démarre pas, l'installation classique (`./nuvio setup`, à la racine du dépôt) reste la voie fiable.
+> **Statut : expérimental, mais testé de bout en bout.** À chaque publication, le workflow GitHub construit l'image, la démarre, vérifie chaque service, crée un compte, redémarre le conteneur et se reconnecte avec le même compte (persistance). L'image n'est publiée que si ce test est vert. Il tourne sur amd64 ; l'image arm64 est construite mais pas testée. Si elle ne démarre pas chez vous, l'installation classique (`./nuvio setup`, à la racine du dépôt) reste la voie de référence.
 
 ## Ce qui est inclus, ce qui ne l'est pas
 
@@ -99,20 +99,18 @@ Mise à jour : récupérez la nouvelle image et recréez le conteneur ; les migr
 
 - **Taille** : l'image embarque le système de fichiers de chaque service et dépasse probablement 2 Go.
 - **Services en root** : chaque service tourne en root dans son chroot, par simplicité. Le chroot isole les fichiers, pas les privilèges.
-- **`/proc` absent dans les chroots** : il n'est monté que si le conteneur a `CAP_SYS_ADMIN`. La plupart des services s'en passent ; si les fonctions Edge ou Storage échouent à cause de cela, ajoutez `cap_add: SYS_ADMIN` et `security_opt: apparmor=unconfined` (voir le compose d'exemple). C'est moins isolé.
+- **`/proc` absent dans les chroots** : il n'est monté que si le conteneur a `CAP_SYS_ADMIN`. Pour cette raison, les fonctions Edge ne tournent pas dans un chroot : elles sont lancées directement, avec le chargeur dynamique et les bibliothèques de leur image (elles lisent `/home/deno/functions`). Les autres services s'en passent. Si Storage échoue pour une raison liée à `/proc`, ajoutez `cap_add: SYS_ADMIN` et `security_opt: apparmor=unconfined` (voir le compose d'exemple).
 - **Fonctions Edge** : elles téléchargent leurs dépendances (`deno.land`) au premier appel, donc le conteneur doit avoir accès à Internet.
 - **Conteneur qui s'arrête au démarrage** : lisez la dernière ligne `ERREUR :` des journaux. Les messages les plus probables concernent un point d'entrée introuvable ou une image amont dont la structure a changé ; mettez à jour les versions dans `Dockerfile` en même temps que `compose.yml`.
 - **Mise à jour des versions** : les images amont sont celles de `compose.yml`. L'image du tableau de bord est `:latest` ; épinglez-la pour des constructions reproductibles.
 
 ## Ce qui a été vérifié
 
-Sans Docker, sur le code de ce dossier :
+- Le Caddyfile est valide (Caddy 2.10) et son routage a été testé avec de faux services : clé `apikey` absente ou fausse refusée, routes ouvertes d'Auth, connexion TV sans clé, CORS et préflight, Storage sans clé, découverte `/.well-known/nuvio`, passerelle interne.
+- Les scripts passent `shellcheck`, le Dockerfile `hadolint`, le workflow `actionlint`.
+- Dans le workflow (amd64) : construction de l'image, démarrage, contrôle de chaque service (`nuvio doctor`), accès au tableau de bord et à la découverte, refus sans clé, inscription, redémarrage, reconnexion.
 
-- le Caddyfile est valide (binaire Caddy 2.10) et son routage a été testé avec de faux services : clé `apikey` absente ou fausse refusée, routes ouvertes d'Auth, connexion TV sans clé, CORS et préflight, Storage sans clé, découverte `/.well-known/nuvio`, passerelle interne ;
-- le script de démarrage passe `shellcheck` ; la génération des secrets (JWT HS256 vérifiés, persistance, droits), la validation de la configuration et la construction de l'environnement de chaque service ont été testées ;
-- le Dockerfile passe `hadolint` ; le workflow passe `actionlint` ; le compose d'exemple est valide.
-
-Non vérifié : la construction de l'image, le démarrage réel de chaque service (point d'entrée de chaque image, chroot, `mknod`), l'initialisation de la base, les migrations et l'envoi des avatars. Le workflow GitHub exécute précisément ce test.
+Non vérifié : arm64, les fonctions Edge appelées avec un vrai jeton de connexion TV, l'envoi d'e-mails, l'import de compte, une mise à jour depuis une version précédente.
 
 ## Fichiers
 
