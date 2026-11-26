@@ -450,6 +450,13 @@ start_loader() {
         [ -d "$dir" ] && libpath="$libpath:$dir"
     done
 
+    # Certains runtimes déduisent leur dossier de travail du nom de leur exécutable
+    # (/proc/self/exe) : on lance donc une copie du chargeur portant le nom d'origine du binaire.
+    local launcher="/run/nuvio-loader/$name/${bin##*/}"
+    mkdir -p "${launcher%/*}"
+    cp -f "$loader" "$launcher"
+    chmod 0755 "$launcher"
+
     local -a argv=("${entry[@]:1}" "${cmd[@]}")
     local -a envcmd=(env -i
         PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root
@@ -457,7 +464,7 @@ start_loader() {
     log "démarrage de $name (sans chroot) : $bin ${argv[*]}"
     (
         exec > >(prefix_output "$name") 2>&1
-        exec "${envcmd[@]}" "$loader" --library-path "$libpath" "$binary" "${argv[@]}"
+        exec "${envcmd[@]}" "$launcher" --library-path "$libpath" "$binary" "${argv[@]}"
     ) &
     PIDS[$name]=$!
 }
