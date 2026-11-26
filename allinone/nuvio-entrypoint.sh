@@ -17,6 +17,8 @@ SECRETS_FILE="$DATA_DIR/secrets.env"
 GATEWAY_URL="http://127.0.0.1:8001"
 DASHBOARD_URL="http://127.0.0.1:8080"
 
+CHROOT_BIN=chroot
+CHROOT_SKIP_CHDIR=0
 declare -A PIDS=()
 declare -A SAVED=()
 SECRET_NAMES=(POSTGRES_PASSWORD JWT_SECRET ANON_KEY SERVICE_ROLE_KEY S3_PROTOCOL_ACCESS_KEY_ID S3_PROTOCOL_ACCESS_KEY_SECRET)
@@ -329,7 +331,12 @@ EOF
 
 # Préfixe chaque ligne de journal avec le nom du service, sans changer le PID
 # du processus lancé (le sous-shell est remplacé par exec).
-prefix_output() { sed -u "s/^/[$1] /"; }
+prefix_output() {
+    local line
+    while IFS= read -r line || [ -n "$line" ]; do
+        printf '[%s] %s\n' "$1" "$line"
+    done
+}
 
 prepare_jail() {
     local root=$1 node name type major minor
@@ -381,13 +388,22 @@ start_jail() {
     [ ${#argv[@]} -gt 0 ] || die "aucune commande à lancer pour le service $name"
 
     log "démarrage de $name : ${argv[*]}"
+    local -a envcmd=(env -i
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root
+        "${image_env[@]}" "${extra_env[@]}")
     (
         exec > >(prefix_output "$name") 2>&1
-        cd "$root$workdir" || exit 1
-        exec env -i \
-            PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root \
-            "${image_env[@]}" "${extra_env[@]}" \
-            "$CHROOT_BIN" --skip-chdir "$root" "${argv[@]}"
+        if [ "$CHROOT_SKIP_CHDIR" -eq 1 ]; then
+            # chroot GNU : on se place dans le dossier de travail avant d'entrer dans le chroot
+            cd "$root$workdir" || exit 1
+            exec "${envcmd[@]}" "$CHROOT_BIN" --skip-chdir "$root" "${argv[@]}"
+        elif [ "$workdir" = "/" ]; then
+            exec "${envcmd[@]}" "$CHROOT_BIN" "$root" "${argv[@]}"
+        else
+            # chroot BusyBox (Alpine) : pas d'option, on change de dossier depuis l'intérieur
+            # shellcheck disable=SC2016
+            exec "${envcmd[@]}" "$CHROOT_BIN" "$root" /bin/sh -c 'cd "$1" || exit 1; shift; exec "$@"' sh "$workdir" "${argv[@]}"
+        fi
     ) &
     PIDS[$name]=$!
 }
@@ -677,6 +693,9 @@ cmd_run() {
     command -v openssl >/dev/null 2>&1 || die "openssl est requis"
     command -v curl >/dev/null 2>&1 || die "curl est requis"
     CHROOT_BIN=$(command -v chroot) || die "chroot est introuvable"
+    local chroot_help
+    chroot_help=$("$CHROOT_BIN" --help 2>&1 || true)
+    if grep -q -- '--skip-chdir' <<< "$chroot_help"; then CHROOT_SKIP_CHDIR=1; else CHROOT_SKIP_CHDIR=0; fi
 
     setup_config
     setup_secrets

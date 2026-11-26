@@ -37,20 +37,25 @@ FROM ${DB_IMAGE}
 # hadolint ignore=DL3002,DL3066
 USER root
 
-# Outils requis par le point d'entrée. L'image Supabase peut avoir un PATH restreint
-# ou ne plus embarquer apt : on ne les installe que s'il en manque.
+# Outils requis par le point d'entrée. L'image Supabase est basée sur Alpine
+# (pas d'apt) et n'embarque ni jq ni openssl : on installe ce qui manque avec apk.
 RUN set -eu; \
     export PATH="$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"; \
-    missing=""; \
-    for tool in bash curl jq openssl psql mountpoint chroot mknod sed grep; do \
-        command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"; \
-    done; \
+    check() { missing=""; for tool in bash curl jq openssl psql mountpoint chroot mknod sed grep; do command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"; done; }; \
+    check; \
     echo "outils manquants :${missing:- aucun}"; \
     if [ -n "$missing" ]; then \
-        command -v apt-get >/dev/null 2>&1 || { echo "apt-get est absent et il manque :$missing" >&2; exit 1; }; \
-        apt-get update; \
-        apt-get install -y --no-install-recommends bash ca-certificates curl jq openssl procps util-linux coreutils sed grep; \
-        rm -rf /var/lib/apt/lists/*; \
+        if command -v apk >/dev/null 2>&1; then \
+            apk add --no-cache bash ca-certificates curl jq openssl; \
+        elif command -v apt-get >/dev/null 2>&1; then \
+            apt-get update; \
+            apt-get install -y --no-install-recommends bash ca-certificates curl jq openssl; \
+            rm -rf /var/lib/apt/lists/*; \
+        else \
+            echo "ni apk ni apt-get : impossible d'installer :$missing" >&2; exit 1; \
+        fi; \
+        check; \
+        [ -z "$missing" ] || { echo "outils toujours manquants :$missing" >&2; exit 1; }; \
     fi
 
 # Passerelle HTTP (remplace Kong)
