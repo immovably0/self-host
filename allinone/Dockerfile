@@ -70,8 +70,9 @@ COPY --from=dashboard / /opt/dashboard/
 
 # Fonctions Edge de Nuvio (monté dans compose.yml sur /home/deno/functions)
 COPY volumes/functions/ /opt/functions/home/deno/functions/
-# Le code des fonctions référence /home/deno/functions : ce service tourne sans chroot.
-RUN mkdir -p /home/deno && ln -s /opt/functions/home/deno/functions /home/deno/functions
+# Ce service tourne sans chroot (il a besoin de /proc) : il lit donc ses fonctions
+# à leur emplacement habituel, /home/deno/functions (copie réelle, pas de lien).
+COPY volumes/functions/ /home/deno/functions/
 
 # Dossier des fichiers de Storage : à monter depuis l'extérieur pour persister
 RUN mkdir -p /opt/storage/var/lib/storage

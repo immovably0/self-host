@@ -25,6 +25,7 @@ cleanup() {
         docker logs --tail 300 "$NAME" 2>&1 || true
         log "journaux des fonctions Edge (extrait) :"
         docker logs "$NAME" 2>&1 | grep -E '^\[functions\]|démarrage de functions' | head -n 60 || true
+        docker exec "$NAME" sh -c 'ls -la /home/deno/functions /home/deno/functions/main; id -un; echo "ld: $(ls /run/nuvio-loader/functions 2>&1)"' 2>&1 || true
     fi
     docker rm -f "$NAME" >/dev/null 2>&1 || true
     # Les fichiers de la base appartiennent à un autre utilisateur : on les supprime depuis un conteneur.
