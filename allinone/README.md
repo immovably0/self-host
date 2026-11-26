@@ -23,11 +23,12 @@ Retiré par rapport à l'installation classique :
 
 ### 1. Obtenir l'image
 
-L'image n'existe pas encore sur GHCR : il faut la construire une fois.
+L'image n'existe pas encore sur GHCR : elle est construite par GitHub, pas par votre NAS.
 
-1. Sur GitHub, ouvrez votre fork, onglet **Actions**, workflow **Publish all-in-one image**, puis **Run workflow** (branche `feat/all-in-one`, case *publish* cochée).
-2. Attendez la fin. Si le job échoue au test, ouvrez ses journaux : ils contiennent ceux du conteneur.
-3. Le paquet GHCR d'un fork est privé par défaut : dans GitHub, **Packages → nuvio-allinone → Package settings → Change visibility → Public**, ou bien connectez votre NAS avec `docker login ghcr.io` (identifiant GitHub + jeton avec droit `read:packages`).
+1. Sur votre fork, onglet **Actions**, activez les workflows si GitHub le propose (ils sont désactivés par défaut sur un fork).
+2. Le workflow se lance déjà à chaque envoi sur la branche `feat/all-in-one` : il construit l'image et exécute le test complet, **sans publier**. Consultez le résultat dans l'onglet Actions, et ouvrez les journaux en cas d'échec : ils contiennent ceux du conteneur.
+3. Quand le test est vert, fusionnez la branche dans `main` (Pull request : <https://github.com/immovably0/self-host/pull/new/feat/all-in-one>). Le workflow se relance sur `main` et publie l'image sur GHCR. Pour republier plus tard sans modifier le code : Actions, **Publish all-in-one image**, **Run workflow**, case *publish* cochée (possible une fois le fichier présent sur `main`).
+4. Le paquet GHCR d'un fork est privé par défaut : dans GitHub, **Packages, nuvio-allinone, Package settings, Change visibility, Public**, ou bien connectez votre NAS avec `docker login ghcr.io` (identifiant GitHub + jeton avec le droit `read:packages`).
 
 ### 2. Créer le conteneur
 

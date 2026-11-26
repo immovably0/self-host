@@ -3,10 +3,11 @@ name: Publish all-in-one image
 # Construit l'image tout-en-un, la teste de bout en bout, puis la publie sur GHCR.
 # La publication n'a lieu que si le test passe, et seulement sur un push de la
 # branche par défaut, sur une étiquette v*, ou à la demande avec publish=true.
+# Sur la branche feat/all-in-one, le workflow construit et teste sans publier.
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/all-in-one]
     paths:
       - "allinone/**"
       - "database/**"
