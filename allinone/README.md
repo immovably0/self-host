@@ -23,12 +23,16 @@ Retiré par rapport à l'installation classique :
 
 ### 1. Obtenir l'image
 
-L'image n'existe pas encore sur GHCR : elle est construite par GitHub, pas par votre NAS.
+L'image est construite et publiée par GitHub, pas par votre NAS, et rien n'est jamais publié depuis `main` : le workflow ne tourne que sur la branche `feat/all-in-one`.
 
 1. Sur votre fork, onglet **Actions**, activez les workflows si GitHub le propose (ils sont désactivés par défaut sur un fork).
-2. Le workflow se lance déjà à chaque envoi sur la branche `feat/all-in-one` : il construit l'image et exécute le test complet, **sans publier**. Consultez le résultat dans l'onglet Actions, et ouvrez les journaux en cas d'échec : ils contiennent ceux du conteneur.
-3. Quand le test est vert, fusionnez la branche dans `main` (Pull request : <https://github.com/immovably0/self-host/pull/new/feat/all-in-one>). Le workflow se relance sur `main` et publie l'image sur GHCR. Pour republier plus tard sans modifier le code : Actions, **Publish all-in-one image**, **Run workflow**, case *publish* cochée (possible une fois le fichier présent sur `main`).
+2. Chaque envoi sur la branche `feat/all-in-one` lance le workflow : construction, test complet, puis publication **uniquement si le test est vert**. En cas d'échec, ouvrez les journaux : ils contiennent ceux du conteneur.
+3. L'image est publiée sur GHCR, sans configuration : `ghcr.io/immovably0/nuvio-allinone:latest`.
 4. Le paquet GHCR d'un fork est privé par défaut : dans GitHub, **Packages, nuvio-allinone, Package settings, Change visibility, Public**, ou bien connectez votre NAS avec `docker login ghcr.io` (identifiant GitHub + jeton avec le droit `read:packages`).
+
+Une fois l'image publiée, `docker pull ghcr.io/immovably0/nuvio-allinone:latest` fonctionne depuis n'importe quelle machine.
+
+**Option Docker Hub** (plus pratique sur Synology : l'image se cherche directement dans Container Manager). Dans les paramètres du fork, **Secrets and variables, Actions**, créez `DOCKERHUB_USERNAME` (votre identifiant) et `DOCKERHUB_TOKEN` (un jeton d'accès Docker Hub avec droit d'écriture). Au prochain envoi, l'image est aussi publiée sur `docker.io/<identifiant>/nuvio-allinone`. Sans ces secrets, seul GHCR est utilisé.
 
 ### 2. Créer le conteneur
 
@@ -36,7 +40,7 @@ Créez trois dossiers sur le NAS, par exemple `/volume1/docker/nuvio/app`, `/pos
 
 | Réglage | Valeur |
 | --- | --- |
-| Image | `ghcr.io/immovably0/nuvio-allinone:latest` |
+| Image | `ghcr.io/immovably0/nuvio-allinone:latest` (ou celle de Docker Hub) |
 | Port | `8000` du conteneur vers un port du NAS (ex. `8000`) |
 | Dossier → `/data` | `…/nuvio/app` (secrets, certificats) |
 | Dossier → `/var/lib/postgresql/data` | `…/nuvio/postgres` (base de données) |

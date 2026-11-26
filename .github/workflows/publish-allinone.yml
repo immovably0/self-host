@@ -1,13 +1,14 @@
 name: Publish all-in-one image
 
-# Construit l'image tout-en-un, la teste de bout en bout, puis la publie sur GHCR.
-# La publication n'a lieu que si le test passe, et seulement sur un push de la
-# branche par défaut, sur une étiquette v*, ou à la demande avec publish=true.
-# Sur la branche feat/all-in-one, le workflow construit et teste sans publier.
+# Construit l'image tout-en-un, la teste de bout en bout, puis la publie.
+# Rien ne se passe sur main : le workflow ne s'exécute que sur la branche
+# feat/all-in-one (et sur les étiquettes v*). La publication n'a lieu que si le
+# test passe : sur GHCR toujours, sur Docker Hub si les secrets DOCKERHUB_USERNAME
+# et DOCKERHUB_TOKEN sont définis dans le dépôt.
 
 on:
   push:
-    branches: [main, feat/all-in-one]
+    branches: [feat/all-in-one]
     paths:
       - "allinone/**"
       - "database/**"
@@ -15,14 +16,10 @@ on:
       - "assets/**"
       - ".github/workflows/publish-allinone.yml"
     tags: ["v*"]
-  pull_request:
-    paths:
-      - "allinone/**"
-      - ".github/workflows/publish-allinone.yml"
   workflow_dispatch:
     inputs:
       publish:
-        description: "Publier l'image sur GHCR après un test réussi"
+        description: "Publier l'image après un test réussi"
         type: boolean
         default: false
 
@@ -32,6 +29,7 @@ permissions:
 
 env:
   IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/nuvio-allinone
+  PUBLISH_BRANCH: feat/all-in-one
 
 jobs:
   static:
@@ -61,6 +59,8 @@ jobs:
   build-test-publish:
     needs: static
     runs-on: ubuntu-latest
+    env:
+      DOCKERHUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
     steps:
       - uses: actions/checkout@v7
 
@@ -86,9 +86,9 @@ jobs:
       - name: Decide whether to publish
         id: gate
         run: |
-          if [ "${{ github.event_name }}" = "push" ] && { [ "${{ github.ref_type }}" = "tag" ] || [ "${{ github.ref_name }}" = "${{ github.event.repository.default_branch }}" ]; }; then
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && { [ "$GITHUB_REF_TYPE" = "tag" ] || [ "$GITHUB_REF_NAME" = "$PUBLISH_BRANCH" ]; }; then
             echo "publish=true" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.publish }}" = "true" ]; then
+          elif [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "${{ inputs.publish }}" = "true" ]; then
             echo "publish=true" >> "$GITHUB_OUTPUT"
           else
             echo "publish=false" >> "$GITHUB_OUTPUT"
@@ -104,15 +104,33 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - uses: docker/login-action@v3
+        if: steps.gate.outputs.publish == 'true' && env.DOCKERHUB_USER != ''
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Image names
+        id: names
+        if: steps.gate.outputs.publish == 'true'
+        run: |
+          {
+            echo "list<<EOF"
+            echo "$IMAGE_NAME"
+            if [ -n "$DOCKERHUB_USER" ]; then
+              echo "docker.io/$DOCKERHUB_USER/nuvio-allinone"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Image tags
         id: meta
         if: steps.gate.outputs.publish == 'true'
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE_NAME }}
+          images: ${{ steps.names.outputs.list }}
           tags: |
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=ref,event=branch
+            type=raw,value=latest
             type=semver,pattern={{version}}
             type=sha
 
