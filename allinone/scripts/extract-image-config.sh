@@ -40,4 +40,14 @@ for name in db auth rest storage functions dashboard; do
     test -s "$OUT/$name.json"
 done
 
+# Diagnostic (affiché dans les journaux) : outils réellement présents dans l'image de base.
+echo "==> diagnostic de l'image de base ${IMAGES[db]}" >&2
+docker run --rm --entrypoint sh "${IMAGES[db]}" -c '
+    echo "PATH=$PATH"; head -n 3 /etc/os-release 2>/dev/null; id -un
+    for c in apt-get dpkg bash curl jq openssl psql mountpoint chroot mknod sed grep; do
+        printf "%s: " "$c"; command -v "$c" || echo ABSENT
+    done
+    ls -d /usr/bin/apt* /nix 2>/dev/null
+' >&2 || echo "diagnostic impossible (pas de sh dans l'image de base)" >&2
+
 echo "Configuration des images écrite dans $OUT" >&2

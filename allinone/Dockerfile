@@ -37,9 +37,21 @@ FROM ${DB_IMAGE}
 # hadolint ignore=DL3002,DL3066
 USER root
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash ca-certificates curl jq openssl procps \
-    && rm -rf /var/lib/apt/lists/*
+# Outils requis par le point d'entrée. L'image Supabase peut avoir un PATH restreint
+# ou ne plus embarquer apt : on ne les installe que s'il en manque.
+RUN set -eu; \
+    export PATH="$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"; \
+    missing=""; \
+    for tool in bash curl jq openssl psql mountpoint chroot mknod sed grep; do \
+        command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"; \
+    done; \
+    echo "outils manquants :${missing:- aucun}"; \
+    if [ -n "$missing" ]; then \
+        command -v apt-get >/dev/null 2>&1 || { echo "apt-get est absent et il manque :$missing" >&2; exit 1; }; \
+        apt-get update; \
+        apt-get install -y --no-install-recommends bash ca-certificates curl jq openssl procps util-linux coreutils sed grep; \
+        rm -rf /var/lib/apt/lists/*; \
+    fi
 
 # Passerelle HTTP (remplace Kong)
 COPY --from=caddy /usr/bin/caddy /usr/local/bin/caddy
