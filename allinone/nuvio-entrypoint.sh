@@ -439,9 +439,11 @@ start_loader() {
     fi
     [ -x "$binary" ] || die "binaire $bin introuvable dans $root"
 
-    local loader libpath
-    loader=$(ls "$root"/lib64/ld-linux-*.so.* "$root"/lib/ld-linux-*.so.* \
-        "$root"/lib/*-linux-gnu/ld-linux-*.so.* "$root"/usr/lib/*-linux-gnu/ld-linux-*.so.* 2>/dev/null | head -n1)
+    local loader="" libpath cand
+    for cand in "$root"/lib64/ld-linux-*.so.* "$root"/lib/ld-linux-*.so.* \
+        "$root"/lib/*-linux-gnu/ld-linux-*.so.* "$root"/usr/lib/*-linux-gnu/ld-linux-*.so.*; do
+        if [ -e "$cand" ]; then loader=$cand; break; fi
+    done
     [ -n "$loader" ] || die "chargeur dynamique (ld-linux) introuvable dans $root"
     libpath="$root/lib:$root/lib64:$root/usr/lib:$root/usr/lib64:$root/usr/local/lib"
     for dir in "$root"/lib/*-linux-gnu "$root"/usr/lib/*-linux-gnu; do
